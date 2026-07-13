@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import folium
+import requests
 from streamlit_folium import st_folium
 from sklearn.cluster import KMeans
 
@@ -8,23 +9,40 @@ from sklearn.cluster import KMeans
 PAGE_TITLE = "Planejador Logistico"
 DEFAULT_COORDS = [-22.86, -43.23] #Isso aqui é fundão
 CLUSTER_COLORS = ['#e41a1c', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00']
+OSRM_NEAREST_URL = "https://router.project-osrm.org/nearest/v1/driving/{lon},{lat}"
 
 def init_state():
-    """Inicializa variáveis de sessão se não existirem."""
     if 'locations' not in st.session_state:
         st.session_state.locations = []
     if 'last_click' not in st.session_state:
         st.session_state.last_click = None
 
+@st.cache_data(show_spinner=False)
+def snap_to_road(lat, lon):
+    # A média do K-means pode cair em água (rio, baía, lago). O OSRM "encaixa"
+    # a coordenada no ponto mais próximo da malha viária real (sempre terra/rua).
+    try:
+        url = OSRM_NEAREST_URL.format(lon=lon, lat=lat)
+        resp = requests.get(url, timeout=5)
+        resp.raise_for_status()
+        waypoints = resp.json().get('waypoints') or []
+        if not waypoints:
+            return lat, lon
+        snapped_lon, snapped_lat = waypoints[0]['location']
+        return snapped_lat, snapped_lon
+    except requests.RequestException:
+        return lat, lon
+
 def get_clusters(locations, k):
-    """Calcula K-Means apenas se houver dados suficientes."""
     if len(locations) <= k:
         return None, None
-    
+
     df = pd.DataFrame(locations, columns=['lat', 'lon'])
     model = KMeans(n_clusters=k, n_init=10, random_state=42)
     model.fit(df)
-    return model.labels_, model.cluster_centers_
+
+    centers = [snap_to_road(lat, lon) for lat, lon in model.cluster_centers_]
+    return model.labels_, centers
 
 def main():
     st.set_page_config(page_title=PAGE_TITLE, layout="wide")

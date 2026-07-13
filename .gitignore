@@ -1,0 +1,5 @@
+backup.py
+venv/
+__pycache__/
+*.pyc
+.claude/
